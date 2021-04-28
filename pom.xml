@@ -50,7 +50,7 @@
 			<plugin>
 				<groupId>org.eclipse.jetty</groupId>
 				<artifactId>jetty-maven-plugin</artifactId>
-				<version>9.3.11.v20160721</version>
+				<version>9.3.15.v20161220</version>
 				<configuration>
 					<jvmArgs>-Dfile.encoding=UTF-8</jvmArgs>
 					<scanIntervalSeconds>5</scanIntervalSeconds>
@@ -59,7 +59,7 @@
 					<dependency>
 						<groupId>org.eclipse.jetty.websocket</groupId>
 						<artifactId>websocket-server</artifactId>
-						<version>9.3.11.v20160721</version>
+						<version>9.3.15.v20161220</version>
 					</dependency>
 				</dependencies>
 			</plugin>
@@ -71,16 +71,27 @@
 					<additionalparam>-Xdoclint:none</additionalparam>
 				</configuration>
 			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<configuration>
+					<archive>
+						<manifest>
+							<addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+						</manifest>
+					</archive>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 	<repositories>
 		<repository>
 			<id>nutz</id>
-			<url>http://maven.nutz.cn/nexus/content/repositories/central</url>
+			<url>https://jfrog.nutz.cn/artifactory/jcenter</url>
 		</repository>
 		<repository>
 			<id>nutz-snapshots</id>
-			<url>http://maven.nutz.cn/nexus/content/repositories/snapshots</url>
+			<url>https://jfrog.nutz.cn/artifactory/snapshots</url>
 			<snapshots>
 				<enabled>true</enabled>
 				<updatePolicy>always</updatePolicy>
@@ -89,23 +100,12 @@
 				<enabled>false</enabled>
 			</releases>
 		</repository>
-		<repository>
-			<id>nexus-nutzcn-thirdparty</id>
-			<name>Nexus nutzcn thirdparty</name>
-			<url>http://maven.nutz.cn/nexus/content/repositories/thirdparty</url>
-			<snapshots>
-				<enabled>false</enabled>
-			</snapshots>
-			<releases>
-				<updatePolicy>never</updatePolicy>
-			</releases>
-		</repository>
 	</repositories>
 	<dependencies>
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-integration-quartz</artifactId>
-			<version>1.r.58</version>
+			<version>1.r.61-SNAPSHOT</version>
 			<exclusions>
 				<exclusion>
 					<artifactId>c3p0</artifactId>
@@ -118,9 +118,24 @@
 			</exclusions>
 		</dependency>
 		<dependency>
+			<groupId>org.quartz-scheduler</groupId>
+			<artifactId>quartz</artifactId>
+			<version>2.2.1</version>
+			<exclusions>
+				<exclusion>
+					<groupId>c3p0</groupId>
+					<artifactId>c3p0</artifactId>
+				</exclusion>
+				<exclusion>
+					<artifactId>slf4j-api</artifactId>
+					<groupId>org.slf4j</groupId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-integration-shiro</artifactId>
-			<version>1.r.58</version>
+			<version>1.r.61-SNAPSHOT</version>
 			<exclusions>
 				<exclusion>
 					<artifactId>slf4j-log4j12</artifactId>
@@ -133,14 +148,9 @@
 			</exclusions>
 		</dependency>
 		<dependency>
-			<groupId>org.apache.lucene</groupId>
-			<artifactId>lucene-highlighter</artifactId>
-			<version>4.9.1</version>
-		</dependency>
-		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-plugins-daocache</artifactId>
-			<version>1.r.58</version>
+			<version>1.r.61-SNAPSHOT</version>
 			<exclusions>
 				<exclusion>
 					<groupId>org.nutz</groupId>
@@ -151,17 +161,27 @@
 		<dependency>
 			<groupId>net.sf.ehcache</groupId>
 			<artifactId>ehcache</artifactId>
-			<version>2.10.1</version>
+			<version>2.10.2.2.21</version>
 		</dependency>
 		<dependency>
 			<groupId>redis.clients</groupId>
 			<artifactId>jedis</artifactId>
-			<version>2.8.1</version>
+			<version>2.9.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-email</artifactId>
 			<version>1.4</version>
+		</dependency>
+		<dependency>
+			<groupId>com.google.zxing</groupId>
+			<artifactId>core</artifactId>
+			<version>3.3.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.google.zxing</groupId>
+			<artifactId>javase</artifactId>
+			<version>3.3.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.brickred</groupId>
@@ -193,7 +213,7 @@
 		<dependency>
 			<groupId>mysql</groupId>
 			<artifactId>mysql-connector-java</artifactId>
-			<version>5.1.39</version>
+			<version>5.1.40</version>
 		</dependency>
 		<dependency>
 			<groupId>javax.servlet</groupId>
@@ -221,7 +241,7 @@
 		<dependency>
 			<groupId>com.ibeetl</groupId>
 			<artifactId>beetl</artifactId>
-			<version>2.5.0</version>
+			<version>2.5.2</version>
 		</dependency>
 		<dependency>
 			<groupId>org.antlr</groupId>
@@ -236,12 +256,12 @@
 		<dependency>
 			<groupId>org.freemarker</groupId>
 			<artifactId>freemarker</artifactId>
-			<version>2.3.20</version>
+			<version>2.3.26-incubating</version>
 		</dependency>
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-plugins-views</artifactId>
-			<version>1.r.58</version>
+			<version>1.r.61-SNAPSHOT</version>
 			<exclusions>
 				<exclusion>
 					<groupId>org.nutz</groupId>
@@ -307,7 +327,7 @@
 		<dependency>
 			<groupId>com.alibaba</groupId>
 			<artifactId>druid</artifactId>
-			<version>1.0.25</version>
+			<version>1.0.27</version>
 			<exclusions>
 				<exclusion>
 					<artifactId>jconsole</artifactId>
@@ -318,11 +338,6 @@
 					<groupId>com.alibaba</groupId>
 				</exclusion>
 			</exclusions>
-		</dependency>
-		<dependency>
-			<groupId>org.nutz</groupId>
-			<artifactId>nutz-qrcode</artifactId>
-			<version>1.b.53</version>
 		</dependency>
 		<dependency>
 			<groupId>commons-lang</groupId>
@@ -374,18 +389,18 @@
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutzwx</artifactId>
-			<version>1.r.58</version>
-			<exclusions>
-				<exclusion>
-					<groupId>org.nutz</groupId>
-					<artifactId>nutz</artifactId>
-				</exclusion>
-			</exclusions>
+			<version>1.r.61-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-mipush-sdk</artifactId>
 			<version>3.0.MOD</version>
+			<exclusions>
+				<exclusion>
+					<groupId>log4j</groupId>
+					<artifactId>log4j</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>javax.websocket</groupId>
@@ -402,7 +417,7 @@
 		<dependency>
 			<groupId>org.ansj</groupId>
 			<artifactId>ansj_seg</artifactId>
-			<version>5.0.2</version>
+			<version>5.0.4</version>
 		</dependency>
 		<dependency>
 			<groupId>org.ansj</groupId>
@@ -412,14 +427,8 @@
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-plugins-mock</artifactId>
-			<version>1.r.58</version>
+			<version>1.r.61-SNAPSHOT</version>
 			<scope>test</scope>
-			<exclusions>
-				<exclusion>
-					<groupId>org.nutz</groupId>
-					<artifactId>nutz</artifactId>
-				</exclusion>
-			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
@@ -434,19 +443,38 @@
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz-plugins-apidoc</artifactId>
-			<version>1.r.58</version>
-			<exclusions>
-				<exclusion>
-					<groupId>org.nutz</groupId>
-					<artifactId>nutz</artifactId>
-				</exclusion>
-			</exclusions>
+			<version>1.r.61-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>org.nutz</groupId>
 			<artifactId>nutz</artifactId>
-			<version>1.r.59-SNAPSHOT</version>
+			<version>1.r.61-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>org.nutz</groupId>
+			<artifactId>nutz-plugins-qrcode</artifactId>
+			<version>1.r.61-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>org.nutz</groupId>
+			<artifactId>nutz-integration-jedis</artifactId>
+			<version>1.r.61-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>com.qiniu</groupId>
+			<artifactId>qiniu-java-sdk</artifactId>
+			<version>7.1.3</version>
+		</dependency>
+		<dependency>
+			<groupId>org.nutz</groupId>
+			<artifactId>nutz-plugins-slog</artifactId>
+			<version>1.r.61-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>org.nutz</groupId>
+			<artifactId>nutz-plugins-cache</artifactId>
+			<version>1.r.61-SNAPSHOT</version>
 		</dependency>
 	</dependencies>
-	<version>2.9.1</version>
+	<version>2.9.5</version>
 </project>

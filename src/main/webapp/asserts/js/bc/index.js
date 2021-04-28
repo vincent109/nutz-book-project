@@ -10,6 +10,7 @@ var bcListVue = new Vue({
 	    base : base,
 	    fromUser : 0,
 	    toUser : 0,
+	    amount : 0,
 	    list2 : [
 	             ["2016-01-07","淡蓝","香港vps(高配) 1年"],
 	             ["2016-01-08","张乐","1元"],
@@ -23,6 +24,7 @@ var bcListVue = new Vue({
 	             ["2016-08-01","木矛","79.99元"],
 	             ["2016-08-01","宗美","3.00元"],
 	             ["2016-08-04","志华","66.00元"],
+	             ["2016-08-04","A.lawliet","500.00元"],
 	             ]
 	},
 	methods : {
@@ -40,7 +42,7 @@ var bcListVue = new Vue({
 			});
 		},
 		do_pay: function(uid) {
-			pay_tips(uid);
+			pay_tips(uid, this.amount);
 		},
 		jump: function(to) {
 			this.pageNumber = to;

@@ -1,6 +1,6 @@
 package net.wendal.nutzbook.websocket;
 
-import static net.wendal.nutzbook.util.RedisInterceptor.jedis;
+import static org.nutz.integration.jedis.RedisInterceptor.jedis;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -14,16 +14,15 @@ import javax.websocket.OnOpen;
 import javax.websocket.Session;
 import javax.websocket.server.ServerEndpoint;
 
+import org.nutz.integration.jedis.JedisAgent;
+import org.nutz.integration.jedis.pubsub.PubSub;
+import org.nutz.integration.jedis.pubsub.PubSubService;
 import org.nutz.ioc.aop.Aop;
 import org.nutz.ioc.loader.annotation.Inject;
 import org.nutz.ioc.loader.annotation.IocBean;
 import org.nutz.lang.random.R;
 import org.nutz.log.Log;
 import org.nutz.log.Logs;
-
-import net.wendal.nutzbook.service.pubsub.PubSub;
-import net.wendal.nutzbook.service.pubsub.PubSubService;
-import redis.clients.jedis.JedisPool;
 
 @ServerEndpoint(value = "/websocket", configurator=NutIocWebSocketConfigurator.class)
 @IocBean(create="init", depose="depose")
@@ -39,7 +38,7 @@ public class NutzbookWebsocket extends Endpoint implements PubSub {
     protected PubSubService pubSubService;
     
     @Inject
-    protected JedisPool jedisPool;
+    protected JedisAgent jedisAgent;
     
     public static String prefix = "wsroom:";
     
@@ -82,7 +81,7 @@ public class NutzbookWebsocket extends Endpoint implements PubSub {
     @OnOpen
     public void onOpen(Session session, EndpointConfig config) {
         String uu32 = R.UU32();
-        NutzbookWsStringHandler handler = new NutzbookWsStringHandler(uu32, session, jedisPool);
+        NutzbookWsStringHandler handler = new NutzbookWsStringHandler(uu32, session, jedisAgent);
         session.addMessageHandler(handler);
         sessionIds.put(session.getId(), uu32);
         _sessions.put(uu32, handler);

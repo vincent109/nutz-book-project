@@ -1,12 +1,13 @@
 package net.wendal.nutzbook.module.yvr;
 
-import static net.wendal.nutzbook.util.RedisInterceptor.jedis;
+import static org.nutz.integration.jedis.RedisInterceptor.jedis;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -14,6 +15,7 @@ import java.util.Set;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
+import org.apache.shiro.authz.annotation.RequiresAuthentication;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.nutz.dao.Cnd;
 import org.nutz.dao.pager.Pager;
@@ -45,11 +47,12 @@ import org.nutz.mvc.view.HttpStatusView;
 import org.nutz.mvc.view.ServerRedirectView;
 import org.nutz.mvc.view.UTF8JsonView;
 import org.nutz.mvc.view.ViewWrapper;
-
 import org.nutz.plugins.apidoc.annotation.Api;
+
 import net.wendal.nutzbook.bean.CResult;
 import net.wendal.nutzbook.bean.User;
 import net.wendal.nutzbook.bean.UserProfile;
+import net.wendal.nutzbook.bean.yvr.SubForum;
 import net.wendal.nutzbook.bean.yvr.Topic;
 import net.wendal.nutzbook.bean.yvr.TopicReply;
 import net.wendal.nutzbook.bean.yvr.TopicType;
@@ -61,8 +64,6 @@ import net.wendal.nutzbook.service.RedisDao;
 import net.wendal.nutzbook.service.yvr.LuceneSearchResult;
 import net.wendal.nutzbook.service.yvr.TopicSearchService;
 import net.wendal.nutzbook.util.Toolkit;
-import redis.clients.jedis.Pipeline;
-import redis.clients.jedis.Response;
 
 @Api(name="论坛模块", description="论坛相关的API")
 @IocBean(create = "init")
@@ -98,15 +99,16 @@ public class YvrModule extends BaseModule {
 	@GET
 	@At
 	@Ok("beetl:yvr/_add.html")
+	@Aop("redis")
 	public Object add(HttpSession session) {
 		NutMap re = new NutMap();
 		re.put("types", TopicType.values());
 
-		String csrf = Lang.md5(R.UU16());
-		session.setAttribute("_csrf", csrf);
-		re.put("_csrf", csrf);
+		String csrf = R.UU32();
+		jedis().setex("csrf:"+csrf, 900, "1");
 		int userId = Toolkit.uid();
 		re.put("current_user", fetch_userprofile(userId));
+		re.put("sub_forums", dao.query(SubForum.class, Cnd.NEW().asc("tagname")));
 		return re;
 	}
 
@@ -115,8 +117,11 @@ public class YvrModule extends BaseModule {
 	@Ok("json")
 	@Filters(@By(type = CsrfActionFilter.class))
 	@AdaptBy(type=WhaleAdaptor.class)
-	public CResult add(@Param("..")Topic topic) {
+	public CResult add(@Param("..")Topic topic, @Param("_tags")String tags) {
 		int userId = Toolkit.uid();
+		if (!Strings.isBlank(tags)) {
+		    topic.setTags(new HashSet<>(Lang.list(Strings.splitIgnoreBlank(tags))));
+		}
 		return yvrService.add(topic, userId);
 	}
 
@@ -140,11 +145,18 @@ public class YvrModule extends BaseModule {
 		User user = dao.fetch(User.class, loginname);
 		if (user == null)
 			return HTTP_404;
-		if ("topic".equals(type)) {
-			list = yvrService.getRecentTopics(user.getId(), pager);
-		} else {
-			list = yvrService.getRecentReplyTopics(user.getId(), pager);
-		}
+		switch (type) {
+        case "topic":
+            list = yvrService.getRecentTopics(user.getId(), pager);
+            break;
+        case "reply":
+            list = yvrService.getRecentReplyTopics(user.getId(), pager);
+            break;
+        case "mark":
+            return _query_topic_by_zset(RKEY_USER_TOPIC_MARK+user.getId(), pager, userId, null, null, pager.getPageNumber() == 1, "list/u/" + loginname + "/" + type);
+        default:
+            return HTTP_404;
+        }
 		return _process_query_list(pager, list, userId, null, null, false, "list/u/" + loginname + "/" + type);
 	}
 	
@@ -218,10 +230,12 @@ public class YvrModule extends BaseModule {
 			re.put("top_topics", new ArrayList<>());
 		
 		re.put("top_tags", yvrService.fetchTopTags());
+		re.put("sub_forums", dao.query(SubForum.class, Cnd.NEW().asc("tagname")));
 		return re;
 	}
 
-	@GET
+	@SuppressWarnings("unchecked")
+    @GET
 	@At("/t/?")
 	@Ok("beetl:yvr/_topic.html")
 	@Aop("redis")
@@ -240,33 +254,22 @@ public class YvrModule extends BaseModule {
 		if (topic.getUserId() == 0)
 			topic.setUserId(1);
         Double visited = jedis().zincrby(RKEY_TOPIC_VISIT, 1, id);
-        // 检查是否匹配etag(其实就是最后回复的replay id), 如果匹配,就304呗
-        String replyId = jedis().hget(RKEY_REPLY_LAST, topic.getId());
-        if (replyId != null && replyId.equals(_etag)) {
-            return HTTP_304;
-        }
-        if (replyId != null)
-            response.setHeader("ETag", replyId);
         
 		topic.setAuthor(fetch_userprofile(topic.getUserId()));
 		dao.fetchLinks(topic, "replies", Cnd.orderBy().asc("createTime"));
-		//-------------------------------------
-		// 修正userId及读取每个reply的ups
-		Pipeline pipe = jedis().pipelined();
-		List<Response<Set<String>>> upsList = new ArrayList<>();
-		for (TopicReply reply : topic.getReplies()) {
-			if (reply.getUserId() == 0)
-				reply.setUserId(1);
-			Response<Set<String>> resp = pipe.zrange(RKEY_REPLY_LIKE + reply.getId(), 0, Long.MAX_VALUE);
-			upsList.add(resp);
-		}
-		pipe.sync();
 		dao.fetchLinks(topic.getReplies(), null);
-		Iterator<Response<Set<String>>> it = upsList.iterator();
+		//-------------------------------------
+		// 点赞功能已废弃
 		for (TopicReply reply : topic.getReplies()) {
-			reply.setUps(it.next().get());
+			reply.setUps(Collections.EMPTY_SET);
 		}
 		bigContentService.fill(topic);
+		// 收藏列表
+		topic.setCollectors(jedis().smembers(RKEY_TOPIC_MARK+topic.getId()));
+		if (topic.getCollectors() == null) {
+		    topic.setCollectors(Collections.EMPTY_SET);
+		}
+		
 		//------------------------------------
 		NutMap re = new NutMap();
 		re.put("topic", topic);
@@ -279,6 +282,9 @@ public class YvrModule extends BaseModule {
 		}
         topic.setVisitCount((visited == null) ? 0 : visited.intValue());
 		re.put("recent_topics", yvrService.getRecentTopics(topic.getUserId(), dao.createPager(1, 5)));
+        re.put("next_topic_id", redisDao.znext(RKEY_TOPIC_UPDATE+topic.getType(), topic.getId()));
+        re.put("prev_topic_id", redisDao.zprev(RKEY_TOPIC_UPDATE+topic.getType(), topic.getId()));
+        re.put("user_topic_marked", topic.getCollectors().contains(""+Toolkit.uid()));
 		//re.put("top_tags", yvrService.fetchTopTags());
 		return re;
 	}
@@ -287,7 +293,6 @@ public class YvrModule extends BaseModule {
 	@POST
 	@At
 	@Ok("json")
-	@Filters(@By(type = CsrfActionFilter.class))
 	public Object upload(@Param("file") TempFile tmp) throws IOException {
 		int userId = Toolkit.uid();
 		return yvrService.upload(tmp, userId);
@@ -303,6 +308,7 @@ public class YvrModule extends BaseModule {
 		return f;
 	}
 
+	@AdaptBy(type=WhaleAdaptor.class)
 	@Filters(@By(type = CsrfActionFilter.class))
 	@At("/t/?/reply")
 	@Ok("json")
@@ -361,19 +367,13 @@ public class YvrModule extends BaseModule {
 		pushService.message(userId, "应用户要求推送到客户端打开帖子", extras);
 	}
 	
-//	@At("/t/?/next")
-//	@Ok("void")
-//	public Object nextTopic(String topidId) {
-//	    Topic topic = dao.fetch(Topic.class);
-//	    if (topic == null)
-//	        return HTTP_404;
-//	    
-//	}
-//	
-//	@At("/t/?/prev")
-//    public void prevTopic(String topidId) {
-//        
-//    }
+	@RequiresAuthentication
+	@POST
+	@At("/t/?/mark")
+	@Ok("void")
+	public void mark(String topicId) {
+	    yvrService.topicMark(topicId, Toolkit.uid());
+	}
 
 	public void init() {
 		log.debug("Image Dir = " + imageDir);

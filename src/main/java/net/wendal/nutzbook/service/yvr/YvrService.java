@@ -2,7 +2,7 @@ package net.wendal.nutzbook.service.yvr;
 
 import static net.wendal.nutzbook.bean.CResult._fail;
 import static net.wendal.nutzbook.bean.CResult._ok;
-import static net.wendal.nutzbook.util.RedisInterceptor.jedis;
+import static org.nutz.integration.jedis.RedisInterceptor.jedis;
 
 import java.io.File;
 import java.io.IOException;
@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,6 +23,8 @@ import org.nutz.dao.Dao;
 import org.nutz.dao.Sqls;
 import org.nutz.dao.pager.Pager;
 import org.nutz.dao.sql.Sql;
+import org.nutz.integration.jedis.pubsub.PubSub;
+import org.nutz.integration.jedis.pubsub.PubSubService;
 import org.nutz.ioc.aop.Aop;
 import org.nutz.ioc.loader.annotation.Inject;
 import org.nutz.ioc.loader.annotation.IocBean;
@@ -42,19 +43,17 @@ import org.nutz.mvc.upload.TempFile;
 import net.wendal.nutzbook.bean.CResult;
 import net.wendal.nutzbook.bean.User;
 import net.wendal.nutzbook.bean.UserProfile;
+import net.wendal.nutzbook.bean.yvr.SubForum;
 import net.wendal.nutzbook.bean.yvr.Topic;
 import net.wendal.nutzbook.bean.yvr.TopicReply;
 import net.wendal.nutzbook.bean.yvr.TopicTag;
 import net.wendal.nutzbook.bean.yvr.TopicType;
 import net.wendal.nutzbook.service.BigContentService;
 import net.wendal.nutzbook.service.PushService;
-import net.wendal.nutzbook.service.pubsub.PubSub;
-import net.wendal.nutzbook.service.pubsub.PubSubService;
 import net.wendal.nutzbook.util.RedisKey;
 import net.wendal.nutzbook.util.Toolkit;
 import net.wendal.nutzbook.websocket.NutzbookWebsocket;
-import redis.clients.jedis.Pipeline;
-import redis.clients.jedis.Response;
+import redis.clients.jedis.Jedis;
 
 @IocBean(create="init")
 public class YvrService implements RedisKey, PubSub {
@@ -169,11 +168,13 @@ public class YvrService implements RedisKey, PubSub {
 		if (0 != dao.count(Topic.class, Cnd.where("title", "=", topic.getTitle().trim()))) {
 			return _fail("相同标题已经发过了");
 		}
+		Set<String> tags = topic.getTags();
+		topic.setTags(new HashSet<>());
 		String oldTitle = topic.getTitle().trim();
 		topic.setTitle(Strings.escapeHtml(topic.getTitle().trim()));
 		topic.setUserId(userId);
 		topic.setTop(false);
-		topic.setTags(new HashSet<String>());
+		//topic.setTags(new HashSet<String>());
 		if (topic.getType() == null)
 			topic.setType(TopicType.ask);
 		topic.setContent(Toolkit.filteContent(topic.getContent()));
@@ -181,14 +182,14 @@ public class YvrService implements RedisKey, PubSub {
 		topic.setContent(null);
 		dao.insert(topic);
 		// 如果是ask类型,把帖子加入到 "未回复"列表
-		Pipeline pipe = jedis().pipelined();
+		Jedis jedis = jedis();
 		if (TopicType.ask.equals(topic.getType())) {
-			pipe.zadd(RKEY_TOPIC_NOREPLY, System.currentTimeMillis(), topic.getId());
+		    jedis.zadd(RKEY_TOPIC_NOREPLY, System.currentTimeMillis(), topic.getId());
 		}
-		pipe.zadd(RKEY_TOPIC_UPDATE + topic.getType(), System.currentTimeMillis(), topic.getId());
+		jedis.zadd(RKEY_TOPIC_UPDATE + topic.getType(), System.currentTimeMillis(), topic.getId());
 		if (topic.getType() == TopicType.ask || topic.getType() == TopicType.news) {
-			pipe.zadd(RKEY_TOPIC_UPDATE_ALL, System.currentTimeMillis(), topic.getId());
-			pipe.zincrby(RKEY_USER_SCORE, 100, ""+userId);
+		    jedis.zadd(RKEY_TOPIC_UPDATE_ALL, System.currentTimeMillis(), topic.getId());
+		    jedis.zincrby(RKEY_USER_SCORE, 100, ""+userId);
 			String replyAuthorName = dao.fetch(User.class, userId).getName();
 			for (Integer watcherId : globalWatcherIds) {
 			    if (watcherId != userId)
@@ -200,9 +201,27 @@ public class YvrService implements RedisKey, PubSub {
 						PushService.PUSH_TYPE_REPLY);
 			}
 		}
-        pipe.sync();
         pubSubService.fire("ps:topic:add", topic.getId());
-        notifyWebSocket("home", "新帖:" + oldTitle, topic.getId());
+        notifyWebSocket("home", "新帖:" + oldTitle, topic.getId(), userId);
+        if (tags != null && tags.size() > 0) {
+            updateTags(topic.getId(), tags);
+            for (String tag : tags) {
+                SubForum sf = dao.fetch(SubForum.class, tag);
+                if (sf != null && sf.getMasters() != null && sf.getMasters().size() > 0) {
+                    for (String master : sf.getMasters()) {
+                        User u_master = dao.fetch(User.class, master);
+                        if (u_master != null) {
+                            pushUser(u_master.getId(),
+                                     tag+"新帖:" + oldTitle,
+                                     topic.getId(),
+                                     dao.fetch(User.class, userId).getName(),
+                                     topic.getTitle(),
+                                     PushService.PUSH_TYPE_REPLY);
+                        }
+                    }
+                }
+            }
+        }
 		return _ok(topic.getId());
 	}
 
@@ -228,28 +247,27 @@ public class YvrService implements RedisKey, PubSub {
 		reply.setContent(null);
 		dao.insert(reply);
 		// 更新topic的时间戳
-		Pipeline pipe = jedis().pipelined();
+		Jedis jedis = jedis();
 		if (topic.isTop()) {
-			pipe.zadd(RKEY_TOPIC_TOP, reply.getCreateTime().getTime(), topicId);
+		    jedis.zadd(RKEY_TOPIC_TOP, reply.getCreateTime().getTime(), topicId);
 		} else {
-			pipe.zadd(RKEY_TOPIC_UPDATE + topic.getType(), reply.getCreateTime().getTime(), topicId);
+		    jedis.zadd(RKEY_TOPIC_UPDATE + topic.getType(), reply.getCreateTime().getTime(), topicId);
 			if (topic.getType() != TopicType.nb && topic.getType() != TopicType.shortit)
-			    pipe.zadd(RKEY_TOPIC_UPDATE_ALL, reply.getCreateTime().getTime(), topicId);
+			    jedis.zadd(RKEY_TOPIC_UPDATE_ALL, reply.getCreateTime().getTime(), topicId);
 		}
-		pipe.zrem(RKEY_TOPIC_NOREPLY, topicId);
+		jedis.zrem(RKEY_TOPIC_NOREPLY, topicId);
 		if (topic.getTags() != null) {
 			for (String tag : topic.getTags()) {
-				pipe.zadd(RKEY_TOPIC_TAG+tag.toLowerCase().trim(), reply.getCreateTime().getTime(), topicId);
+			    jedis.zadd(RKEY_TOPIC_TAG+tag.toLowerCase().trim(), reply.getCreateTime().getTime(), topicId);
 			}
 		}
-		pipe.hset(RKEY_REPLY_LAST, topicId, reply.getId());
-		pipe.zincrby(RKEY_REPLY_COUNT, 1, topicId);
-		pipe.zincrby(RKEY_USER_SCORE, 10, ""+userId);
-		pipe.sync();
+		jedis.hset(RKEY_REPLY_LAST, topicId, reply.getId());
+		jedis.zincrby(RKEY_REPLY_COUNT, 1, topicId);
+		jedis.zincrby(RKEY_USER_SCORE, 10, ""+userId);
 
 		notifyUsers(topic, reply, cnt, userId);
         pubSubService.fire("ps:topic:reply", topic.getId());
-        notifyWebSocket("topic:"+topic.getId(), "新回复: " + topic.getTitle(), topic.getId());
+        notifyWebSocket("topic:"+topic.getId(), "新回复: " + topic.getTitle(), topic.getId(), userId);
 		return _ok(reply.getId());
 	}
 
@@ -422,7 +440,8 @@ public class YvrService implements RedisKey, PubSub {
 			oldTags = new HashSet<>();
 		log.debugf("update from '%s' to '%s'", oldTags, tags);
 		topic.setTags(tags);
-		dao.update(topic, "tags");
+		topic.setUpdateTime(new Date());
+		dao.update(topic, "tags|updateTime");
 		Set<String> newTags = new HashSet<>(tags);
 		newTags.removeAll(oldTags);
 		Set<String> removeTags = new HashSet<>(oldTags);;
@@ -431,16 +450,15 @@ public class YvrService implements RedisKey, PubSub {
 		Date lastReplyTime = topic.getCreateTime();
 		if (topic.getLastComment() != null)
 			lastReplyTime = topic.getLastComment().getCreateTime();
-		Pipeline pipe = jedis().pipelined();
+		Jedis jedis = jedis();
 		for (String tag : removeTags) {
-			pipe.zrem(RKEY_TOPIC_TAG+tag.toLowerCase().trim(), topic.getId());
-			pipe.zincrby(RKEY_TOPIC_TAG_COUNT, -1, tag.toLowerCase().trim());
+		    jedis.zrem(RKEY_TOPIC_TAG+tag.toLowerCase().trim(), topic.getId());
+		    jedis.zincrby(RKEY_TOPIC_TAG_COUNT, -1, tag.toLowerCase().trim());
 		}
 		for (String tag : newTags) {
-			pipe.zadd(RKEY_TOPIC_TAG+tag.toLowerCase().trim(), lastReplyTime.getTime(), topic.getId());
-			pipe.zincrby(RKEY_TOPIC_TAG_COUNT, 1, tag.toLowerCase().trim());
+		    jedis.zadd(RKEY_TOPIC_TAG+tag.toLowerCase().trim(), lastReplyTime.getTime(), topic.getId());
+		    jedis.zincrby(RKEY_TOPIC_TAG_COUNT, 1, tag.toLowerCase().trim());
 		}
-		pipe.sync();
 		return true;
 	}
 
@@ -462,16 +480,9 @@ public class YvrService implements RedisKey, PubSub {
 	public List<TopicTag> fetchTopTags() {
 		Set<String> names = jedis().zrevrangeByScore(RKEY_TOPIC_TAG_COUNT, Long.MAX_VALUE, 0, 0, 20);
 		List<TopicTag> tags = new ArrayList<>();
-		List<Response<Double>> tmps = new ArrayList<>();
-		Pipeline pipe = jedis().pipelined();
+		Jedis jedis = jedis();
 		for (String name: names) {
-			tmps.add(pipe.zscore(RKEY_TOPIC_TAG_COUNT, name));
-			tags.add(new TopicTag(name, 0));
-		}
-		pipe.sync();
-		Iterator<TopicTag> it = tags.iterator();
-		for (Response<Double> response : tmps) {
-			it.next().setCount(response.get().intValue());
+			tags.add(new TopicTag(name, jedis.zscore(RKEY_TOPIC_TAG_COUNT, name).intValue()));
 		}
 		return tags;
 	}
@@ -496,7 +507,7 @@ public class YvrService implements RedisKey, PubSub {
 		}
 	}
 
-	@Async
+    @Async
 	@Aop("redis")
 	public void updateTopicTypeCount() {
 		for (TopicType tt : TopicType.values()) {
@@ -504,11 +515,12 @@ public class YvrService implements RedisKey, PubSub {
 		}
 	}
 
-    protected void notifyWebSocket(String room, Object data, String tag) {
+    protected void notifyWebSocket(String room, Object data, String tag, int byuser) {
         NutMap map = new NutMap();
         map.put("action", "notify");
         map.put("data", data);
         map.put("options", new NutMap().setv("tag", tag));
+        map.put("byuser", byuser);
         String msg = Json.toJson(map, JsonFormat.compact());
         pubSubService.fire(NutzbookWebsocket.prefix+room, msg);
     }
@@ -520,13 +532,36 @@ public class YvrService implements RedisKey, PubSub {
         // TODO 数据库集群的delay会导致
         case "ps:topic:add":
             updateTopicTypeCount();
-            topicSearchService.add(dao.fetch(Topic.class, message));
+            topicSearchService.addIndex(dao.fetch(Topic.class, message), true);
             break;
         case "ps:topic:reply":
-            topicSearchService.add(dao.fetch(Topic.class, message));
+            topicSearchService.addIndex(dao.fetch(Topic.class, message), false);
             break;
         default:
             break;
         }
+    }
+    
+    /**
+     * 收藏/取消收藏
+     * @param topicId 帖子id
+     * @param uid 用户id
+     * @param markOrUnmark true,如果是收藏. false, 取消收藏
+     * @return 是否成功
+     */
+    @Aop("redis")
+    public boolean topicMark(String topicId, int uid) {
+        if (uid < 1)
+            return false;
+        if (dao.count(Topic.class, Cnd.where("id", "=", topicId)) == 0)
+            return false;
+        if (!jedis().sismember(RKEY_TOPIC_MARK+topicId, ""+uid)) {
+            jedis().sadd(RKEY_TOPIC_MARK+topicId, ""+uid);
+            jedis().zadd(RKEY_USER_TOPIC_MARK+uid, System.currentTimeMillis(), topicId);
+        } else {
+            jedis().srem(RKEY_TOPIC_MARK+topicId, ""+uid);
+            jedis().zrem(RKEY_USER_TOPIC_MARK+uid, topicId);
+        }
+        return true;
     }
 }

@@ -6,8 +6,8 @@ ENV CATALINA_HOME /usr/local/tomcat
 ENV PATH $CATALINA_HOME/bin:$PATH
 RUN mkdir -p "$CATALINA_HOME"
 ENV TOMCAT_MAJOR 8
-ENV TOMCAT_VERSION 8.5.6
-ENV TOMCAT_TGZ_URL https://www.apache.org/dist/tomcat/tomcat-$TOMCAT_MAJOR/v$TOMCAT_VERSION/bin/apache-tomcat-$TOMCAT_VERSION.tar.gz
+ENV TOMCAT_VERSION 8.5.9
+ENV TOMCAT_TGZ_URL http://archive.apache.org/dist/tomcat/tomcat-$TOMCAT_MAJOR/v$TOMCAT_VERSION/bin/apache-tomcat-$TOMCAT_VERSION.tar.gz
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN cd $CATALINA_HOME \
@@ -30,7 +30,7 @@ RUN mkdir /tmp2 && cd /tmp2 \
   && cd /tmp2 && ls -l  && cd nutz-book-project-master \
   && mvn -Dmaven.test.skip=true clean package \
   && mkdir -p /usr/local/tomcat/webapps/ROOT \
-  && cp -r target/nutzbook-2.9.1/* /usr/local/tomcat/webapps/ROOT/ \
+  && cp -r target/nutzbook-2.9.5/* /usr/local/tomcat/webapps/ROOT/ \
   && find /usr/local/tomcat/webapps/ROOT/ \
   && cd / \
   && rm -fr /tmp2 /usr/share/maven /usr/bin/mvn ~/.m2

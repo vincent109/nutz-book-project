@@ -6,6 +6,7 @@ $(function(){
 			topicTitle : "",
 			topicContent : "",
 			topicButtonTip : "我要答案(提交)",
+			topicTag : "",
 			suggestions : []
 		},
 		methods : {
@@ -19,10 +20,10 @@ $(function(){
 					layer.alert("标题最多100个字符");
 					return;
 				}
-				var kvs = ["兽总", "在线等", "兽兽", "兽哥", "菜鸟", "急急", "揪心", "求帮忙", "为毛", "急需", "弱弱", "兽懂"]; // 这样下去我得弄个表了...
+				var kvs = ["兽总", "在线等", "兽兽", "兽哥", "菜鸟", "急急", "揪心", "求帮忙", "为毛", "急需", "弱弱", "兽懂", "新手"]; // 这样下去我得弄个表了...
 				for (var i=0;i<kvs.length;i++) {
 					if (this.topicTitle.indexOf(kvs[i]) > -1) {
-						layer.alert("标题含有禁止出现的字符["+kvs[i]+"],请修改措辞");
+						layer.alert("标题含有["+kvs[i]+"],请修改措辞");
 						return;
 					}
 				}
@@ -33,9 +34,11 @@ $(function(){
 					return;
 				}
 				this.topicButtonTip = "正在提交...";
-				var tmpData = {"type":this.topicType,
+				var tmpData = {
+						"type":this.topicType,
 						"title":this.topicTitle,
-						"content":this.topicContent
+						"content":this.topicContent,
+						"_tags" : this.topicTag
 				};
 				this.$http.post(ctxPath+"/yvr/add", tmpData).then(function(resp){
 					this.topicButtonTip = "我要答案";

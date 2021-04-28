@@ -17,14 +17,17 @@ import org.nutz.lang.Strings;
 import org.nutz.lang.util.NutMap;
 import org.nutz.mvc.Mvcs;
 import org.nutz.mvc.annotation.At;
+import org.nutz.mvc.annotation.By;
 import org.nutz.mvc.annotation.Fail;
+import org.nutz.mvc.annotation.Filters;
 import org.nutz.mvc.annotation.GET;
 import org.nutz.mvc.annotation.Ok;
 import org.nutz.mvc.annotation.POST;
 import org.nutz.mvc.annotation.Param;
-
+import org.nutz.mvc.filter.CrossOriginFilter;
 import org.nutz.plugins.apidoc.annotation.Api;
-import net.wendal.nutzbook.annotation.SLog;
+import org.nutz.plugins.slog.annotation.Slog;
+
 import net.wendal.nutzbook.bean.User;
 import net.wendal.nutzbook.bean.UserProfile;
 import net.wendal.nutzbook.util.Toolkit;
@@ -34,9 +37,10 @@ import net.wendal.nutzbook.util.Toolkit;
 @At("/user") // 整个模块的路径前缀
 @Ok("json:{locked:'password|salt',ignoreNull:true}") // 忽略password和salt属性,忽略空属性的json输出
 @Fail("http:500") // 抛出异常的话,就走500页面
-@SLog(tag="用户管理", msg="")
+@Slog(tag="用户管理")
 public class UserModule extends BaseModule {
 	
+    @Filters(@By(type=CrossOriginFilter.class))
 	@At
 	public int count() { // 统计用户数的方法,算是个测试点
 		return dao.count(User.class);
@@ -49,6 +53,7 @@ public class UserModule extends BaseModule {
 
 	@RequiresPermissions("user:add")
 	@At
+	@Slog(tag="新增用户", before="用户[${user.name}] ok=${re.ok}")
 	public Object add(@Param("..")User user) { // 两个点号是按对象属性一一设置
 		NutMap re = new NutMap();
 		String msg = checkUser(user, true);
@@ -61,17 +66,18 @@ public class UserModule extends BaseModule {
 
 	@RequiresPermissions("user:update")
 	@At
-	public Object update(@Param("password")String password, @Param("id")int userId) {
+	@Slog(tag="更新用户", before="用户[${id}] ok=${re.ok}")
+	public Object update(@Param("password")String password, @Param("id")int id) {
 		if (Strings.isBlank(password) || password.length() < 6)
 			return new NutMap().setv("ok", false).setv("msg", "密码不符合要求");
-		userService.updatePassword(userId, password);
+		userService.updatePassword(id, password);
 		return new NutMap().setv("ok", true);
 	}
 
 	@RequiresPermissions("user:delete")
 	@At
 	@Aop(TransAop.READ_COMMITTED)
-	@SLog(tag="删除用户", msg="用户id[${args[0]}]")
+	@Slog(tag="删除用户", before="用户id[${id}]")
 	public Object delete(@Param("id")int id) {
 		int me = Toolkit.uid();
 		if (me == id) {
@@ -141,6 +147,7 @@ public class UserModule extends BaseModule {
 	@POST
 	@Ok("json")
 	@At
+	@Slog(tag="用户登录", after="用户[${username}] ok=${re.ok}")
 	public Object login(@Param("username")String username, 
 					  @Param("password")String password,
 					  @Param("rememberMe")boolean rememberMe,

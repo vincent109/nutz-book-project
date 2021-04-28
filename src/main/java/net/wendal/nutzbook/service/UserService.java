@@ -1,11 +1,10 @@
 package net.wendal.nutzbook.service;
 
-import static net.wendal.nutzbook.util.RedisInterceptor.jedis;
+import static org.nutz.integration.jedis.RedisInterceptor.jedis;
 
 import java.util.Date;
 import java.util.List;
 
-import net.wendal.nutzbook.annotation.SLog;
 import net.wendal.nutzbook.bean.User;
 import net.wendal.nutzbook.bean.UserProfile;
 import net.wendal.nutzbook.page.Pagination;
@@ -18,13 +17,14 @@ import org.nutz.ioc.aop.Aop;
 import org.nutz.ioc.loader.annotation.IocBean;
 import org.nutz.lang.Lang;
 import org.nutz.lang.random.R;
+import org.nutz.plugins.slog.annotation.Slog;
 import org.nutz.service.IdNameEntityService;
 
 @IocBean(fields = "dao")
-@SLog(tag = "用户管理", msg = "")
+@Slog(tag = "用户管理")
 public class UserService extends IdNameEntityService<User> implements RedisKey {
 
-	@SLog(tag = "新增用户", msg = "用户名[${args[0]}]")
+	@Slog(tag = "新增用户", before = "用户名[${name}]")
 	public User add(String name, String password) {
 		User user = new User();
 		user.setName(name.trim().toLowerCase());
@@ -53,6 +53,7 @@ public class UserService extends IdNameEntityService<User> implements RedisKey {
 		return -1;
 	}
 
+	@Slog(tag = "用户更新密码", before = "用户名[${userId}]")
 	public void updatePassword(int userId, String password) {
 		User user = fetch(userId);
 		if (user == null) {

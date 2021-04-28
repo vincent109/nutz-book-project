@@ -1,6 +1,6 @@
 package net.wendal.nutzbook.service.sysinfo.impl;
 
-import static net.wendal.nutzbook.util.RedisInterceptor.jedis;
+import static org.nutz.integration.jedis.RedisInterceptor.jedis;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,7 +13,6 @@ import org.nutz.lang.util.NutMap;
 import net.wendal.nutzbook.bean.User;
 import net.wendal.nutzbook.bean.UserProfile;
 import net.wendal.nutzbook.util.RedisKey;
-import net.wendal.nutzbook.util.Toolkit;
 
 @IocBean
 public class UserSummerInfoProvider extends AbstractSysInfoProvider implements RedisKey {
@@ -46,14 +45,21 @@ public class UserSummerInfoProvider extends AbstractSysInfoProvider implements R
         map.put("value", dao.count(User.class, Cnd.where("createTime", ">", from30d())));
         re.add(map);
         
-        map = new NutMap();
-        map.put("name", "今天在线人数");
-        map.put("value", jedis().bitcount(RKEY_ONLINE_DAY + Toolkit.today_yyyyMMdd()));
-        re.add(map);
+        //map = new NutMap();
+        //map.put("name", "今天在线人数");
+        //map.put("value", jedis().bitcount(RKEY_ONLINE_DAY + Toolkit.today_yyyyMMdd()));
+        //re.add(map);
+        
+        //map = new NutMap();
+        //map.put("name", "当前小时在线人数");
+        //map.put("value", jedis().bitcount(RKEY_ONLINE_HOUR + Toolkit.today_yyyyMMddHH()));
+        //re.add(map);
+        
+        long now = System.currentTimeMillis();
         
         map = new NutMap();
-        map.put("name", "当前小时在线人数");
-        map.put("value", jedis().bitcount(RKEY_ONLINE_HOUR + Toolkit.today_yyyyMMddHH()));
+        map.put("name", "最近24小时在线人数");
+        map.put("value", jedis().zcount(RKEY_USER_LVTIME, now - 24*3600*1000L, now));
         re.add(map);
         
         return re;

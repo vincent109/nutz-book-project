@@ -11,12 +11,10 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.net.ssl.SSLContext;
 
-import org.nutz.dao.Cnd;
 import org.nutz.dao.Dao;
-import org.nutz.dao.Sqls;
-import org.nutz.dao.sql.Sql;
 import org.nutz.dao.util.Daos;
 import org.nutz.el.opt.custom.CustomMake;
+import org.nutz.integration.jedis.JedisAgent;
 import org.nutz.integration.quartz.NutQuartzCronJobFactory;
 import org.nutz.integration.shiro.NutShiro;
 import org.nutz.ioc.Ioc;
@@ -29,6 +27,7 @@ import org.nutz.log.Logs;
 import org.nutz.mvc.Mvcs;
 import org.nutz.mvc.NutConfig;
 import org.nutz.mvc.Setup;
+import org.nutz.plugins.slog.service.SlogService;
 import org.nutz.plugins.view.freemarker.FreeMarkerConfigurer;
 import org.quartz.Scheduler;
 
@@ -37,21 +36,13 @@ import net.sf.ehcache.CacheManager;
 import net.wendal.nutzbook.bean.User;
 import net.wendal.nutzbook.bean.UserProfile;
 import net.wendal.nutzbook.bean.msg.UserMessage;
-import net.wendal.nutzbook.bean.yvr.Topic;
-import net.wendal.nutzbook.bean.yvr.TopicReply;
 import net.wendal.nutzbook.ig.RedisIdGenerator;
 import net.wendal.nutzbook.service.AuthorityService;
-import net.wendal.nutzbook.service.BigContentService;
 import net.wendal.nutzbook.service.SysConfigureService;
 import net.wendal.nutzbook.service.UserService;
-import net.wendal.nutzbook.service.syslog.SysLogService;
 import net.wendal.nutzbook.service.yvr.YvrService;
-import net.wendal.nutzbook.shiro.cache.LCacheManager;
-import net.wendal.nutzbook.shiro.cache.RedisCache;
 import net.wendal.nutzbook.util.Markdowns;
-import net.wendal.nutzbook.util.RedisKey;
 import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
 
 /**
  * Nutz内核初始化完成后的操作
@@ -65,8 +56,8 @@ public class MainSetup implements Setup {
 	
 	public static PropertiesProxy conf;
 
-	public void init(NutConfig nc) {
-		NutShiro.DefaultLoginURL = "/admin/logout";
+    public void init(NutConfig nc) {
+		NutShiro.DefaultLoginURL = "/";
 		// 检查环境,必须运行在UTF-8环境
 		if (!Charset.defaultCharset().name().equalsIgnoreCase(Encoding.UTF8)) {
 			log.error("This project must run in UTF-8, pls add -Dfile.encoding=UTF-8 to JAVA_OPTS");
@@ -78,19 +69,15 @@ public class MainSetup implements Setup {
 		// 获取Ioc容器及Dao对象
 		Ioc ioc = nc.getIoc();
 
-		// 初始化RedisCacheManager
-		LCacheManager.me().setupJedisPool(ioc.get(JedisPool.class));
-		RedisCache.DEBUG = true;
+		// 初始化JedisAgent
+		JedisAgent jedisAgent = ioc.get(JedisAgent.class);
 
         Dao dao = ioc.get(Dao.class);
         
         // 为全部标注了@Table的bean建表
         Daos.createTablesInPackage(dao, getClass().getPackage().getName()+".bean", false);
-        Daos.migration(dao, Topic.class, true, false);
-        Daos.migration(dao, TopicReply.class, true, false);
 
-		JedisPool pool = ioc.get(JedisPool.class);
-		try (Jedis jedis = pool.getResource()) {
+		try (Jedis jedis = jedisAgent.getResource()) {
             if (!jedis.exists("ig:t_user") && dao.count(User.class) > 0)
                 jedis.set("ig:t_user", ""+dao.getMaxId(User.class)+1);
             if (!jedis.exists("ig:t_user_message") && dao.count(UserMessage.class) > 0)
@@ -103,30 +90,12 @@ public class MainSetup implements Setup {
 		ioc.get(Configuration.class).setAutoImports(new NutMap().setv("p", "/ftl/pony/index.ftl").setv("s", "/ftl/spring.ftl"));
 		ioc.get(FreeMarkerConfigurer.class, "mapTags");
 
-		
-		// 迁移Topic和TopicReply的数据到BigContent
-		BigContentService bcs = ioc.get(BigContentService.class);
-		for (String topicId : dao.execute(Sqls.queryString("select id from t_topic where cid is null")).getObject(String[].class)) {
-			Topic topic = dao.fetch(Topic.class, topicId);
-			String cid = bcs.put(topic.getContent());
-			topic.setContentId(cid);
-			topic.setContent(null);
-			dao.update(topic, "(content|contentId)");
-		}
-		for (String topicId : dao.execute(Sqls.queryString("select id from t_topic_reply where cid is null")).getObject(String[].class)) {
-			TopicReply reply = dao.fetch(TopicReply.class, topicId);
-			String cid = bcs.put(reply.getContent());
-			reply.setContentId(cid);
-			reply.setContent(null);
-			dao.update(reply, "(content|contentId)");
-		}
-
 		// 获取配置对象
 		conf = ioc.get(PropertiesProxy.class, "conf");
 		ioc.get(SysConfigureService.class).doReload();
 
 		// 初始化SysLog,触发全局系统日志初始化
-		ioc.get(SysLogService.class);
+		ioc.get(SlogService.class).log("method", "system", null, "系统启动", false);
 
 		// 初始化默认根用户
 		User admin = dao.fetch(User.class, "admin");
@@ -161,31 +130,7 @@ public class MainSetup implements Setup {
 		if (cacheManager.getCache("markdown") == null)
 			cacheManager.addCache("markdown");
 		Markdowns.cache = cacheManager.getCache("markdown");
-		
-		if (dao.meta().isMySql()) {
-			String schema = dao.execute(Sqls.fetchString("SELECT DATABASE()")).getString();
-			
-			// 检查所有非日志表,如果表引擎是MyISAM,切换到InnoDB
-			Sql sql = Sqls.queryString("SELECT TABLE_NAME FROM information_schema.TABLES where TABLE_SCHEMA = @schema and engine = 'MyISAM'");
-			sql.params().set("schema", schema);
-			for (String tableName : dao.execute(sql).getObject(String[].class)) {
-				if (tableName.startsWith("t_syslog") || tableName.startsWith("t_user_message"))
-					continue;
-				dao.execute(Sqls.create("alter table "+tableName+" ENGINE = InnoDB"));
-			}
-		}
 
-        try (final Jedis jedis = pool.getResource()) {
-            dao.each(Topic.class, Cnd.where("good", "=", true), (index, topic, length) -> {
-                Double t = jedis.zscore(RedisKey.RKEY_TOPIC_UPDATE
-                                        + topic.getType(),
-                                        topic.getId());
-                if (t == null)
-                    t = (double) topic.getCreateTime().getTime();
-                jedis.zadd(RedisKey.RKEY_TOPIC_UPDATE + "good", t, topic.getId());
-            });
-        }
-        
 		ioc.get(YvrService.class).updateTopicTypeCount();
 		
 		Mvcs.disableFastClassInvoker = false;
@@ -226,8 +171,6 @@ public class MainSetup implements Setup {
                 mbeanServer.unregisterMBean(objectName);
         } catch (Exception ex) {
         }
-		
-        LCacheManager.me().depose();
         
         // org.brickred.socialauth.util.HttpUtil 把一个内部类注册到SSLContext,擦!
         try {
